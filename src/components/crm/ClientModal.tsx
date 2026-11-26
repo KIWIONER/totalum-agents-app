@@ -52,29 +52,36 @@ export function ClientModal({
     setFieldErrors({});
 
     startTransition(async () => {
-      const payload = {
-        name,
-        company,
-        email,
-        phone,
-        segment,
-      };
+      try {
+        const payload = {
+          name,
+          company,
+          email,
+          phone,
+          segment,
+        };
 
-      const result = client
-        ? await updateClientAction(client.id, payload)
-        : await createClientAction(payload);
+        const result = client
+          ? await updateClientAction(client.id, payload)
+          : await createClientAction(payload);
 
-      if (!result.ok) {
-        setErrorMessage(result.error);
-        setFieldErrors(result.fieldErrors ?? {});
-        return;
+        if (!result.ok) {
+          setErrorMessage(result.error);
+          setFieldErrors(result.fieldErrors ?? {});
+          return;
+        }
+
+        onSaved(
+          result.message ??
+            (client ? "Cliente actualizado." : "Cliente creado correctamente.")
+        );
+        onClose();
+      } catch (error: unknown) {
+        console.error("[crm] Error de red al guardar cliente:", error);
+        setErrorMessage(
+          "Error de conexión con el servidor. Inténtalo de nuevo."
+        );
       }
-
-      onSaved(
-        result.message ??
-          (client ? "Cliente actualizado." : "Cliente creado correctamente.")
-      );
-      onClose();
     });
   }
 

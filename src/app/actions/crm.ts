@@ -18,6 +18,14 @@ interface RawTaskRow extends Omit<TaskItem, "amount_eur"> {
   amount_eur: number | string;
 }
 
+interface SupabaseLikeError {
+  code?: string;
+  message?: string;
+}
+
+const UUID_REGEX =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 function normalizeTaskRow(row: RawTaskRow): TaskItem {
   const numericAmount = Number(row.amount_eur);
   return {
@@ -34,7 +42,35 @@ function toRecord(input: unknown): Record<string, unknown> {
 }
 
 function isValidId(id: unknown): id is string {
-  return typeof id === "string" && id.trim().length > 0;
+  return typeof id === "string" && UUID_REGEX.test(id.trim());
+}
+
+function mapSupabaseError(
+  error: SupabaseLikeError | null | undefined,
+  fallbackMessage: string
+): string {
+  if (!error) {
+    return fallbackMessage;
+  }
+
+  switch (error.code) {
+    case "PGRST116":
+      return "El registro ya no existe o fue eliminado.";
+    case "23503":
+      return "Referencia inválida. Comprueba que el registro relacionado exista.";
+    case "22P02":
+      return "Identificador o formato de dato no válido.";
+    case "23505":
+      return "Ya existe un registro con los mismos datos.";
+    case "42501":
+      return "No tienes permisos para realizar esta operación.";
+    default:
+      console.error("[crm] Error de Supabase:", {
+        code: error.code,
+        message: error.message,
+      });
+      return fallbackMessage;
+  }
 }
 
 async function requireAuthenticatedClient() {
@@ -64,6 +100,45 @@ async function requireAuthenticatedClient() {
     supabase,
     userId: user.id,
   };
+}
+
+async function verifyClientOwnership(
+  supabase: Awaited<ReturnType<typeof createServerSupabaseClient>>,
+  userId: string,
+  clientId: string
+): Promise<
+  | { ok: true; clientId: string }
+  | { ok: false; error: string; fieldErrors: Record<string, string> }
+> {
+  if (!isValidId(clientId)) {
+    return {
+      ok: false,
+      error: "El identificador del cliente no es válido.",
+      fieldErrors: {
+        client_id: "Selecciona un cliente válido de tu cuenta.",
+      },
+    };
+  }
+
+  const cleanClientId = clientId.trim();
+  const { data, error } = await supabase
+    .from("crm_clients")
+    .select("id")
+    .eq("id", cleanClientId)
+    .eq("user_id", userId)
+    .maybeSingle<{ id: string }>();
+
+  if (error || !data) {
+    return {
+      ok: false,
+      error: "El cliente seleccionado no existe o no pertenece a tu cuenta.",
+      fieldErrors: {
+        client_id: "Selecciona un cliente válido de tu cuenta.",
+      },
+    };
+  }
+
+  return { ok: true, clientId: data.id };
 }
 
 export async function createClientAction(
@@ -97,7 +172,7 @@ export async function createClientAction(
   if (error || !data) {
     return {
       ok: false,
-      error: error?.message ?? "No se pudo crear el cliente.",
+      error: mapSupabaseError(error, "No se pudo crear el cliente."),
     };
   }
 
@@ -144,7 +219,7 @@ export async function updateClientAction(
   if (error || !data) {
     return {
       ok: false,
-      error: error?.message ?? "No se pudo actualizar el cliente.",
+      error: mapSupabaseError(error, "No se pudo actualizar el cliente."),
     };
   }
 
@@ -178,7 +253,7 @@ export async function deleteClientAction(
   if (error) {
     return {
       ok: false,
-      error: error.message || "No se pudo eliminar el cliente.",
+      error: mapSupabaseError(error, "No se pudo eliminar el cliente."),
     };
   }
 
@@ -209,11 +284,25 @@ export async function createTaskAction(
     };
   }
 
+  let verifiedClientId: string | null = null;
+  if (validation.data.client_id !== null) {
+    const ownership = await verifyClientOwnership(
+      auth.supabase,
+      auth.userId,
+      validation.data.client_id
+    );
+    if (!ownership.ok) {
+      return ownership;
+    }
+    verifiedClientId = ownership.clientId;
+  }
+
   const { data, error } = await auth.supabase
     .from("crm_tasks")
     .insert({
       user_id: auth.userId,
       ...validation.data,
+      client_id: verifiedClientId,
     })
     .select("*")
     .single<RawTaskRow>();
@@ -221,7 +310,7 @@ export async function createTaskAction(
   if (error || !data) {
     return {
       ok: false,
-      error: error?.message ?? "No se pudo crear la tarea.",
+      error: mapSupabaseError(error, "No se pudo crear la tarea."),
     };
   }
 
@@ -257,10 +346,24 @@ export async function updateTaskAction(
     };
   }
 
+  let verifiedClientId: string | null = null;
+  if (validation.data.client_id !== null) {
+    const ownership = await verifyClientOwnership(
+      auth.supabase,
+      auth.userId,
+      validation.data.client_id
+    );
+    if (!ownership.ok) {
+      return ownership;
+    }
+    verifiedClientId = ownership.clientId;
+  }
+
   const { data, error } = await auth.supabase
     .from("crm_tasks")
     .update({
       ...validation.data,
+      client_id: verifiedClientId,
       updated_at: new Date().toISOString(),
     })
     .eq("id", id.trim())
@@ -271,7 +374,7 @@ export async function updateTaskAction(
   if (error || !data) {
     return {
       ok: false,
-      error: error?.message ?? "No se pudo actualizar la tarea.",
+      error: mapSupabaseError(error, "No se pudo actualizar la tarea."),
     };
   }
 
@@ -314,7 +417,10 @@ export async function updateTaskStatusAction(
   if (error || !data) {
     return {
       ok: false,
-      error: error?.message ?? "No se pudo actualizar el estado de la tarea.",
+      error: mapSupabaseError(
+        error,
+        "No se pudo actualizar el estado de la tarea."
+      ),
     };
   }
 
@@ -348,7 +454,7 @@ export async function deleteTaskAction(
   if (error) {
     return {
       ok: false,
-      error: error.message || "No se pudo eliminar la tarea.",
+      error: mapSupabaseError(error, "No se pudo eliminar la tarea."),
     };
   }
 
@@ -388,10 +494,10 @@ export async function seedDemoDataAction(): Promise<
   if (clientsCheck.error || tasksCheck.error) {
     return {
       ok: false,
-      error:
-        clientsCheck.error?.message ??
-        tasksCheck.error?.message ??
-        "No se pudo comprobar el estado actual de los datos.",
+      error: mapSupabaseError(
+        clientsCheck.error ?? tasksCheck.error,
+        "No se pudo comprobar el estado actual de los datos."
+      ),
     };
   }
 
@@ -448,8 +554,10 @@ export async function seedDemoDataAction(): Promise<
   if (clientsError || !insertedClients || insertedClients.length === 0) {
     return {
       ok: false,
-      error:
-        clientsError?.message ?? "No se pudieron crear los clientes demo.",
+      error: mapSupabaseError(
+        clientsError,
+        "No se pudieron crear los clientes demo."
+      ),
     };
   }
 
@@ -531,7 +639,10 @@ export async function seedDemoDataAction(): Promise<
   if (tasksError) {
     return {
       ok: false,
-      error: tasksError.message || "No se pudieron crear las tareas demo.",
+      error: mapSupabaseError(
+        tasksError,
+        "No se pudieron crear las tareas demo."
+      ),
     };
   }
 

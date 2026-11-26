@@ -177,6 +177,12 @@ export function CrmDashboard({
       handleMutationSuccess(
         `Tarea movida a "${TASK_STATUS_LABELS[nextStatus]}".`
       );
+    } catch (error: unknown) {
+      console.error("[crm] Error de red al cambiar estado de tarea:", error);
+      setBanner({
+        type: "error",
+        text: "Error de conexión con el servidor. Inténtalo de nuevo.",
+      });
     } finally {
       setBusyTaskId(null);
     }
@@ -205,6 +211,12 @@ export function CrmDashboard({
       }
 
       handleMutationSuccess(result.message ?? "Tarea eliminada.");
+    } catch (error: unknown) {
+      console.error("[crm] Error de red al eliminar tarea:", error);
+      setBanner({
+        type: "error",
+        text: "Error de conexión con el servidor. Inténtalo de nuevo.",
+      });
     } finally {
       setBusyTaskId(null);
     }
@@ -233,6 +245,12 @@ export function CrmDashboard({
       }
 
       handleMutationSuccess(result.message ?? "Cliente eliminado.");
+    } catch (error: unknown) {
+      console.error("[crm] Error de red al eliminar cliente:", error);
+      setBanner({
+        type: "error",
+        text: "Error de conexión con el servidor. Inténtalo de nuevo.",
+      });
     } finally {
       setDeletingClientId(null);
     }
@@ -245,21 +263,45 @@ export function CrmDashboard({
 
     setBanner(null);
     startSeedTransition(async () => {
-      const result = await seedDemoDataAction();
-      if (!result.ok) {
-        setBanner({ type: "error", text: result.error });
-        return;
-      }
+      try {
+        const result = await seedDemoDataAction();
+        if (!result.ok) {
+          setBanner({ type: "error", text: result.error });
+          return;
+        }
 
-      handleMutationSuccess(
-        result.message ?? "Datos de ejemplo cargados correctamente."
-      );
+        handleMutationSuccess(
+          result.message ?? "Datos de ejemplo cargados correctamente."
+        );
+      } catch (error: unknown) {
+        console.error("[crm] Error de red al cargar datos demo:", error);
+        setBanner({
+          type: "error",
+          text: "Error de conexión con el servidor. Inténtalo de nuevo.",
+        });
+      }
     });
   }
 
   function handleSignOut() {
     startSignOutTransition(async () => {
-      await signOutAction();
+      try {
+        await signOutAction();
+      } catch (error: unknown) {
+        if (
+          error instanceof Error &&
+          "digest" in error &&
+          typeof (error as { digest?: unknown }).digest === "string" &&
+          (error as { digest: string }).digest.startsWith("NEXT_REDIRECT")
+        ) {
+          throw error;
+        }
+        console.error("[crm] Error de red al cerrar sesión:", error);
+        setBanner({
+          type: "error",
+          text: "No se pudo cerrar sesión por un error de conexión.",
+        });
+      }
     });
   }
 
@@ -515,6 +557,22 @@ export function CrmDashboard({
                   </button>
                 )}
               </div>
+
+              {hasActiveFilters && (
+                <div className="flex items-center justify-between border-t border-slate-100 pt-2.5 text-xs text-slate-500 md:col-span-12">
+                  <span>
+                    Mostrando{" "}
+                    <strong className="font-semibold text-slate-800">
+                      {filteredTasks.length}
+                    </strong>{" "}
+                    de{" "}
+                    <strong className="font-semibold text-slate-800">
+                      {initialTasks.length}
+                    </strong>{" "}
+                    {initialTasks.length === 1 ? "tarea" : "tareas"}
+                  </span>
+                </div>
+              )}
             </section>
 
             {isEmptyWorkspace && (

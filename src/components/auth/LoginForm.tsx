@@ -52,31 +52,38 @@ export function LoginForm({ isConfigured, demoEmail }: LoginFormProps) {
     setSuccessMessage(null);
 
     startTransition(async () => {
-      if (mode === "signin") {
-        const result = await signInAction({ email, password });
+      try {
+        if (mode === "signin") {
+          const result = await signInAction({ email, password });
+          if (!result.ok) {
+            setErrorMessage(result.error);
+            return;
+          }
+          router.push("/");
+          router.refresh();
+          return;
+        }
+
+        const result = await signUpAction({ email, password });
         if (!result.ok) {
           setErrorMessage(result.error);
           return;
         }
-        router.push("/");
-        router.refresh();
-        return;
-      }
 
-      const result = await signUpAction({ email, password });
-      if (!result.ok) {
-        setErrorMessage(result.error);
-        return;
-      }
-
-      if (result.requiresConfirmation) {
-        setSuccessMessage(
-          "Cuenta creada. Revisa tu bandeja de entrada para confirmar tu correo antes de iniciar sesión."
+        if (result.requiresConfirmation) {
+          setSuccessMessage(
+            "Cuenta creada. Revisa tu bandeja de entrada para confirmar tu correo antes de iniciar sesión."
+          );
+          setPassword("");
+        } else {
+          router.push("/");
+          router.refresh();
+        }
+      } catch (error: unknown) {
+        console.error("[login] Error de red en autenticación:", error);
+        setErrorMessage(
+          "Error de conexión con el servidor. Inténtalo de nuevo."
         );
-        setPassword("");
-      } else {
-        router.push("/");
-        router.refresh();
       }
     });
   }
@@ -98,6 +105,11 @@ export function LoginForm({ isConfigured, demoEmail }: LoginFormProps) {
       }
       router.push("/");
       router.refresh();
+    } catch (error: unknown) {
+      console.error("[login] Error de red en acceso demo:", error);
+      setErrorMessage(
+        "Error de conexión con el servidor. Inténtalo de nuevo."
+      );
     } finally {
       setIsDemoPending(false);
     }

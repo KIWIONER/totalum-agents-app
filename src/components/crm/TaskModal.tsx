@@ -65,31 +65,38 @@ export function TaskModal({
     setFieldErrors({});
 
     startTransition(async () => {
-      const payload = {
-        title,
-        description,
-        client_id: clientId || null,
-        status,
-        priority,
-        amount_eur: amountEur === "" ? 0 : Number(amountEur),
-        due_date: dueDate || null,
-      };
+      try {
+        const payload = {
+          title,
+          description,
+          client_id: clientId || null,
+          status,
+          priority,
+          amount_eur: amountEur === "" ? 0 : Number(amountEur),
+          due_date: dueDate || null,
+        };
 
-      const result = task
-        ? await updateTaskAction(task.id, payload)
-        : await createTaskAction(payload);
+        const result = task
+          ? await updateTaskAction(task.id, payload)
+          : await createTaskAction(payload);
 
-      if (!result.ok) {
-        setErrorMessage(result.error);
-        setFieldErrors(result.fieldErrors ?? {});
-        return;
+        if (!result.ok) {
+          setErrorMessage(result.error);
+          setFieldErrors(result.fieldErrors ?? {});
+          return;
+        }
+
+        onSaved(
+          result.message ??
+            (task ? "Tarea actualizada." : "Tarea creada correctamente.")
+        );
+        onClose();
+      } catch (error: unknown) {
+        console.error("[crm] Error de red al guardar tarea:", error);
+        setErrorMessage(
+          "Error de conexión con el servidor. Inténtalo de nuevo."
+        );
       }
-
-      onSaved(
-        result.message ??
-          (task ? "Tarea actualizada." : "Tarea creada correctamente.")
-      );
-      onClose();
     });
   }
 
